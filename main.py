@@ -1,41 +1,51 @@
-import cv2
-import numpy as np
-import time
+from datetime import datetime
 import copy
-import os
 import glob
 import multiprocessing as mpr
-from datetime import datetime
+import os
+import sys
+import time
+
+import cv2
+import numpy as np
+import six
 
 from kalman_filter import KalmanFilter
 from tracker import Tracker
 
+if len(sys.argv) > 1:
+    CONFIG = sys.argv[1]
+else:
+    CONFIG = 'whitmore_grade'
 
+if six.PY2:
+    _temp = __import__('config.{}'.format(CONFIG), globals(), locals(),
+        ['UNITS', 'PLAYLIST_URL', 'FPS', 'ROAD_DISTANCE', 'SPEED_LIMIT', 'Y_THRESH_LEFT', 'IMAGE_WIDTH', 'Y_THRESH_RIGHT'], -1
+    )
+    UNITS = _temp.UNITS
+    PLAYLIST_URL = _temp.PLAYLIST_URL
+    FPS = _temp.FPS
+    ROAD_DISTANCE = _temp.ROAD_DISTANCE
+    SPEED_LIMIT = _temp.SPEED_LIMIT
+    Y_THRESH_LEFT = _temp.Y_THRESH_LEFT
+    IMAGE_WIDTH = _temp.IMAGE_WIDTH
+    Y_THRESH_RIGHT = _temp.Y_THRESH_RIGHT
+    # In next iteration we will use the object's coordinates instead of only y
+    Y_THRESH = (Y_THRESH_LEFT + Y_THRESH_RIGHT) / 2
+
+if UNITS == 'imperial':
+    speed_unit = 'MPH'
+elif UNITS == 'metric':
+    speed_unit = 'km/h'
+else:
+    raise Exception('UNITS should be one of [imperial|metric]')
 
 if __name__ == '__main__':
-    # The one I first used for testing; after staring at it so much, I've grown attached to this road :3
-    the_og_base_url = 'http://wzmedia.dot.ca.gov:1935/D3/89_rampart.stream/'
-
-    BASE_URL = 'http://wzmedia.dot.ca.gov:1935/D3/80_whitmore_grade.stream/'
-    FPS = 30
-    '''
-        Distance to line in road: ~0.025 miles
-    '''
-    ROAD_DIST_MILES = 0.025
-
-    '''
-        Speed limit of urban freeways in California (50-65 MPH)
-    '''
-    HIGHWAY_SPEED_LIMIT = 65
-
     # Initial background subtractor and text font
     fgbg = cv2.createBackgroundSubtractorMOG2()
     font = cv2.FONT_HERSHEY_PLAIN
 
     centers = [] 
-
-    # y-cooridinate for speed detection line
-    Y_THRESH = 240
 
     blob_min_width_far = 6
     blob_min_height_far = 6
@@ -49,7 +59,7 @@ if __name__ == '__main__':
     tracker = Tracker(80, 3, 2, 1)
 
     # Capture livestream
-    cap = cv2.VideoCapture (BASE_URL + 'playlist.m3u8')
+    cap = cv2.VideoCapture (PLAYLIST_URL)
 
     while True:
         centers = []
@@ -59,7 +69,8 @@ if __name__ == '__main__':
         orig_frame = copy.copy(frame)
 
         #  Draw line used for speed detection
-        cv2.line(frame,(0, Y_THRESH),(640, Y_THRESH),(255,0,0),2)
+        # cv2.line(frame,(0, Y_THRESH), (640, Y_THRESH), (255,0,0), 2)
+        cv2.line(frame,(0, Y_THRESH_LEFT), (IMAGE_WIDTH, Y_THRESH_RIGHT), (255,0,0), 2)
 
 
         # Convert frame to grayscale and perform background subtraction
@@ -100,8 +111,8 @@ if __name__ == '__main__':
                         # Draw trace line
                         x1 = vehicle.trace[j][0][0]
                         y1 = vehicle.trace[j][1][0]
-                        x2 = vehicle.trace[j+1][0][0]
-                        y2 = vehicle.trace[j+1][1][0]
+                        x2 = vehicle.trace[j + 1][0][0]
+                        y2 = vehicle.trace[j + 1][1][0]
 
                         cv2.line(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 255), 2)
 
@@ -126,21 +137,20 @@ if __name__ == '__main__':
                             time_dur /= 60
                             time_dur /= 60
 
-                            
-                            vehicle.mph = ROAD_DIST_MILES / time_dur
+                            vehicle.speed = ROAD_DISTANCE / time_dur
 
                             # If calculated speed exceeds speed limit, save an image of speeding car
-                            if vehicle.mph > HIGHWAY_SPEED_LIMIT:
+                            if vehicle.speed > SPEED_LIMIT:
                                 print ('UH OH, SPEEDING!')
                                 cv2.circle(orig_frame, (int(trace_x), int(trace_y)), 20, (0, 0, 255), 2)
-                                cv2.putText(orig_frame, 'MPH: %s' % int(vehicle.mph), (int(trace_x), int(trace_y)), font, 1, (0, 0, 255), 1, cv2.LINE_AA)
+                                cv2.putText(orig_frame, 'MPH: %s' % int(vehicle.speed), (int(trace_x), int(trace_y)), font, 1, (0, 0, 255), 1, cv2.LINE_AA)
                                 cv2.imwrite('speeding_%s.png' % vehicle.track_id, orig_frame)
                                 print ('FILE SAVED!')
 
                     
                         if vehicle.passed:
                             # Display speed if available
-                            cv2.putText(frame, 'MPH: %s' % int(vehicle.mph), (int(trace_x), int(trace_y)), font, 1, (0, 255, 255), 1, cv2.LINE_AA)
+                            cv2.putText(frame, 'MPH: %s' % int(vehicle.speed), (int(trace_x), int(trace_y)), font, 1, (0, 255, 255), 1, cv2.LINE_AA)
                         else:
                             # Otherwise, just show tracking id
                             cv2.putText(frame, 'ID: '+ str(vehicle.track_id), (int(trace_x), int(trace_y)), font, 1, (255, 255, 255), 1, cv2.LINE_AA)
